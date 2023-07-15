@@ -2,17 +2,39 @@ package main
 
 import (
 	"fmt"
+	"image"
+	"image/color"
+	"image/gif"
+	"io"
 	"io/ioutil"
+	"math"
+	"math/rand"
 	"net/http"
 	_ "net/http/pprof"
+	"strconv"
 
 	jq "github.com/savaki/jq"
 )
 
+var palette = []color.Color{color.White, color.RGBA{0, 0xff, 0, 0xff},
+	color.RGBA{0, 0, 0xff, 0xff}, color.RGBA{0xff, 0, 0, 0xff},
+	color.RGBA{0x22, 0x22, 0x22, 0xff}, color.RGBA{0xff, 0x44, 0x15, 0xff},
+	color.RGBA{0x44, 0x62, 0x12, 0xff}, color.RGBA{0xff, 0xff, 0x15, 0xff}}
+
 func main() {
 	http.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Query().Get("id")
-		fmt.Fprintf(w, "\nURL.Path = %s\nhere is a response body, with id %s", r.URL.Path, id)
+		// id := r.URL.Query().Get("id")
+		// fmt.Fprintf(w, "\nURL.Path = %s\nhere is a response body, with id %s", r.URL.Path, id)
+		cycles, e := strconv.Atoi(r.URL.Query().Get("cycles"))
+		if e != nil || cycles < 5 {
+			cycles = 5
+		}
+		lissajous(float64(cycles), w)
+		// 设置响应头，指定Content-Type为image/gif
+		w.Header().Set("Content-Type", "image/gif")
+
+		// 设置响应头，指定Content-Disposition为attachment，并指定默认的文件名
+		w.Header().Set("Content-Disposition", `attachment; filename="default.gif"`)
 	})
 	http.HandleFunc("/test1", func(w http.ResponseWriter, r *http.Request) {
 		body, rerr := ioutil.ReadAll(r.Body)
@@ -34,4 +56,33 @@ func main() {
 		w.Write(([]byte)("}"))
 	})
 	http.ListenAndServe("localhost:8502", nil)
+}
+func lissajous(cycles float64, out io.Writer) {
+	const (
+		// number of complete x oscillator revolutions
+		res     = 0.001 // angular resolution
+		size    = 100   // image canvas covers [-size..+size]
+		nframes = 64    // number of animation frames
+		delay   = 8     // delay between frames in 10ms units
+	)
+
+	freq := rand.Float64() * 3.0 // relative frequency of y oscillator
+	anim := gif.GIF{LoopCount: nframes}
+	phase := 0.0 // phase difference
+	colorIndex := 1
+	for i := 0; i < nframes; i++ {
+		rect := image.Rect(0, 0, 2*size+1, 2*size+1)
+		img := image.NewPaletted(rect, palette)
+		for t := 0.0; t < cycles*2*math.Pi; t += res {
+			x := math.Sin(t)
+			y := math.Sin(t*freq + phase)
+			img.SetColorIndex(size+int(x*size+0.5), size+int(y*size+0.5),
+				uint8(colorIndex))
+		}
+		phase += 0.1
+		colorIndex = rand.Int()%7 + 1
+		anim.Delay = append(anim.Delay, delay)
+		anim.Image = append(anim.Image, img)
+	}
+	gif.EncodeAll(out, &anim) // NOTE: ignoring encoding errors
 }
